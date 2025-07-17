@@ -1,44 +1,48 @@
 import streamlit as st
 import pandas as pd
+import requests
+from io import StringIO
 
-st.title("2025년 6월 기준 연령별 인구 분석")
+# 앱 제목
+st.title("2025년 5월 행정구역별 연령별 인구 현황 대시보드")
 
-# ✅ GitHub CSV raw URL을 아래에 입력하세요!
-csv_url = "https://raw.githubusercontent.com/사용자명/레포지토리명/브랜치명/경로/파일명.csv"
+# GitHub에 업로드한 CSV 파일 주소 입력
+# ★ 이곳을 본인 GitHub 주소로 바꿔주세요!
+CSV_URL = "https://raw.githubusercontent.com/사용자아이디/레포지토리명/main/202506_202506_주민등록인구및세대현황_월간.csv"
+
+# 데이터 불러오기
+@st.cache_data
+def load_data(url):
+    response = requests.get(url)
+    response.encoding = 'EUC-KR'  # 행정안전부 자료는 EUC-KR 인코딩
+    data = StringIO(response.text)
+    df = pd.read_csv(data)
+    return df
 
 try:
-    # GitHub에서 직접 불러오기 (EUC-KR 인코딩)
-    df = pd.read_csv(csv_url, encoding="euc-kr")
+    df = load_data(CSV_URL)
 
-    # 열 이름 자동 확인
-    region_col = [col for col in df.columns if "행정구역" in col][0]
-    total_col = [col for col in df.columns if "총인구수" in col][0]
-    age_columns = [col for col in df.columns if col.startswith("2025년06월_계_")]
+    # 컬럼 정리
+    df.columns = df.columns.str.strip()
+    df["행정구역"] = df["행정구역"].str.split("(").str[0]
 
-    # 필요한 열만 추출
-    age_data = df[[region_col, total_col] + age_columns].copy()
-    age_data.rename(columns={col: col.replace("2025년06월_계_", "") for col in age_columns}, inplace=True)
+    # 연령별 컬럼만 추출
+    age_cols = [col for col in df.columns if "2025년05월_계_" in col and "세" in col]
+    df["총인구수"] = df["총인구수"].astype(int)
+    df_age = df[["행정구역", "총인구수"] + age_cols].copy()
 
-    # 숫자형 변환
-    for col in age_data.columns[2:]:
-        age_data[col] = pd.to_numeric(age_data[col], errors="coerce")
+    # 연령 컬럼 이름 정리
+    new_cols = ["행정구역", "총인구수"] + [col.replace("2025년05월_계_", "").replace("세", "") for col in age_cols]
+    df_age.columns = new_cols
 
-    # 총인구수 기준 상위 5개
-    top5 = age_data.sort_values(total_col, ascending=False).head(5)
+    # 시각화: 상위 5개 행정구역의 연령별 인구
+    top5 = df_age.sort_values(by="총인구수", ascending=False).head(5).set_index("행정구역")
 
-    # 시각화용 데이터 변환
-    chart_data = top5.set_index(region_col).drop(columns=[total_col]).T
-    chart_data.index.name = "연령"
+    st.subheader("📈 상위 5개 행정구역의 연령별 인구 변화 (선 그래프)")
+    st.line_chart(top5.drop(columns="총인구수").T)
 
-    st.subheader("상위 5개 행정구역 연령별 인구 변화")
-    st.line_chart(chart_data)
-
-    st.subheader("개별 행정구역 인구 그래프 보기")
-    selected_region = st.selectbox("행정구역을 선택하세요", chart_data.columns)
-    st.line_chart(chart_data[[selected_region]])
-
-    st.subheader("원본 데이터")
-    st.dataframe(df)
+    st.subheader("🔍 원본 데이터 미리보기")
+    st.dataframe(df.head())
 
 except Exception as e:
-    st.error(f"데이터를 불러오는 데 문제가 발생했습니다: {e}")
+    st.error(f"❌ 데이터를 불러오는 데 문제가 발생했습니다:\n\n{e}")
